@@ -3,131 +3,332 @@ import sys
 import re
 import string
 import pickle
-
 import nltk
-from nltk.corpus import stopwords
 
-import keras
+from nltk.corpus import stopwords
+from tensorflow import keras
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 from hate.logger import logging
 from hate.exception import CustomException
 from hate.constants import MAX_LEN
 
-nltk.download("stopwords", quiet=True)
-
 
 class PredictionPipeline:
 
     def __init__(self):
-
-        BASE_DIR = os.getcwd()
-
-        # ----------------------------
-        # FIND MODEL AUTOMATICALLY
-        # ----------------------------
-
-        self.model_path = None
-
-        for root, dirs, files in os.walk(
-            os.path.join(BASE_DIR, "artifacts")
-        ):
-            for file in files:
-
-                if file.endswith(".h5") or file.endswith(".keras"):
-
-                    self.model_path = os.path.join(root, file)
-                    break
-
-            if self.model_path:
-                break
-
-        if self.model_path is None:
-            raise Exception(
-                "No trained model (.h5/.keras) found inside artifacts folder."
+        try:
+            # =========================================================
+            # PROJECT ROOT DIRECTORY
+            # =========================================================
+            BASE_DIR = os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(
+                        os.path.abspath(__file__)
+                    )
+                )
             )
 
-        # ----------------------------
-        # TOKENIZER
-        # ----------------------------
+            self.base_dir = BASE_DIR
 
-        self.tokenizer_path = os.path.join(
-            BASE_DIR,
-            "tokenizer.pickle"
-        )
+            logging.info(
+                f"Project base directory: {BASE_DIR}"
+            )
 
-        if not os.path.exists(self.tokenizer_path):
-            raise Exception("tokenizer.pickle not found.")
+            # =========================================================
+            # ARTIFACTS DIRECTORY
+            # =========================================================
+            artifacts_dir = os.path.join(
+                BASE_DIR,
+                "artifacts"
+            )
 
-    # ---------------------------------------------------------
+            if not os.path.exists(artifacts_dir):
+                raise FileNotFoundError(
+                    f"Artifacts directory not found: {artifacts_dir}"
+                )
+
+            # =========================================================
+            # FIND ALL TRAINED MODELS
+            # =========================================================
+            model_files = []
+
+            for root, dirs, files in os.walk(artifacts_dir):
+
+                for file in files:
+
+                    if file.endswith(".h5") or file.endswith(".keras"):
+
+                        model_files.append(
+                            os.path.join(root, file)
+                        )
+
+            if not model_files:
+                raise FileNotFoundError(
+                    "No trained model (.h5 or .keras) "
+                    "found inside artifacts directory."
+                )
+
+            # =========================================================
+            # SELECT LATEST MODEL
+            # =========================================================
+            self.model_path = max(
+                model_files,
+                key=os.path.getmtime
+            )
+
+            logging.info(
+                f"Latest trained model found at: "
+                f"{self.model_path}"
+            )
+
+            # =========================================================
+            # TOKENIZER
+            # =========================================================
+            self.tokenizer_path = os.path.join(
+                BASE_DIR,
+                "tokenizer.pickle"
+            )
+
+            if not os.path.exists(self.tokenizer_path):
+
+                raise FileNotFoundError(
+                    f"tokenizer.pickle not found at: "
+                    f"{self.tokenizer_path}"
+                )
+
+            logging.info(
+                f"Tokenizer found at: {self.tokenizer_path}"
+            )
+
+            # =========================================================
+            # LOAD TOKENIZER
+            # =========================================================
+            with open(
+                self.tokenizer_path,
+                "rb"
+            ) as file:
+
+                self.tokenizer = pickle.load(file)
+
+            logging.info(
+                "Tokenizer loaded successfully."
+            )
+
+            # =========================================================
+            # STOPWORDS
+            # =========================================================
+            try:
+
+                self.stop_words = set(
+                    stopwords.words("english")
+                )
+
+            except LookupError:
+
+                nltk.download(
+                    "stopwords",
+                    quiet=True
+                )
+
+                self.stop_words = set(
+                    stopwords.words("english")
+                )
+
+            # =========================================================
+            # STEMMER
+            # =========================================================
+            self.stemmer = nltk.SnowballStemmer(
+                "english"
+            )
+
+            # =========================================================
+            # LOAD MODEL ONCE
+            # =========================================================
+            logging.info(
+                "Loading TensorFlow model..."
+            )
+
+            self.model = keras.models.load_model(
+                self.model_path,
+                compile=False
+            )
+
+            logging.info(
+                "TensorFlow model loaded successfully."
+            )
+
+        except Exception as e:
+
+            logging.error(
+                f"PredictionPipeline initialization failed: {str(e)}"
+            )
+
+            raise CustomException(e, sys) from e
+
+    # =============================================================
+    # TEXT CLEANING
+    # =============================================================
 
     def clean_text(self, text):
 
-        stemmer = nltk.SnowballStemmer("english")
-        stop_words = set(stopwords.words("english"))
+        try:
 
-        text = str(text).lower()
+            text = str(text).lower()
 
-        text = re.sub(r"\[.*?\]", "", text)
-        text = re.sub(r"https?://\S+|www\.\S+", "", text)
-        text = re.sub(r"<.*?>+", "", text)
-        text = re.sub("[%s]" % re.escape(string.punctuation), "", text)
-        text = re.sub(r"\n", "", text)
-        text = re.sub(r"\w*\d\w*", "", text)
+            # Remove square brackets
+            text = re.sub(
+                r"\[.*?\]",
+                "",
+                text
+            )
 
-        words = []
+            # Remove URLs
+            text = re.sub(
+                r"https?://\S+|www\.\S+",
+                "",
+                text
+            )
 
-        for word in text.split():
+            # Remove HTML
+            text = re.sub(
+                r"<.*?>",
+                "",
+                text
+            )
 
-            if word not in stop_words:
+            # Remove punctuation
+            text = re.sub(
+                "[%s]" % re.escape(string.punctuation),
+                "",
+                text
+            )
 
-                words.append(stemmer.stem(word))
+            # Remove newline
+            text = re.sub(
+                r"\n",
+                " ",
+                text
+            )
 
-        return " ".join(words)
+            # Remove words containing numbers
+            text = re.sub(
+                r"\w*\d\w*",
+                "",
+                text
+            )
 
-    # ---------------------------------------------------------
+            # Stopword removal + stemming
+            words = []
+
+            for word in text.split():
+
+                if word not in self.stop_words:
+
+                    words.append(
+                        self.stemmer.stem(word)
+                    )
+
+            return " ".join(words)
+
+        except Exception as e:
+
+            raise CustomException(e, sys) from e
+
+    # =============================================================
+    # PREDICTION
+    # =============================================================
 
     def predict(self, text):
 
         try:
 
-            logging.info(f"Loading model from : {self.model_path}")
-
-            model = keras.models.load_model(self.model_path)
-
-            with open(self.tokenizer_path, "rb") as f:
-                tokenizer = pickle.load(f)
-
-            text = self.clean_text(text)
-
-            sequence = tokenizer.texts_to_sequences([text])
-
-            padded = pad_sequences(
-                sequence,
-                maxlen=MAX_LEN
+            logging.info(
+                f"Prediction request received: {text}"
             )
 
-            prediction = model.predict(padded, verbose=0)
+            # -----------------------------------------------------
+            # Clean text
+            # -----------------------------------------------------
+            cleaned_text = self.clean_text(text)
 
-            score = float(prediction[0][0])
+            logging.info(
+                f"Cleaned text: {cleaned_text}"
+            )
 
-            print("Prediction Score :", score)
+            # -----------------------------------------------------
+            # Convert text to sequence
+            # -----------------------------------------------------
+            sequence = self.tokenizer.texts_to_sequences(
+                [cleaned_text]
+            )
 
+            # -----------------------------------------------------
+            # Padding
+            # -----------------------------------------------------
+            padded = pad_sequences(
+                sequence,
+                maxlen=MAX_LEN,
+                padding="pre",
+                truncating="pre"
+            )
+
+            # -----------------------------------------------------
+            # Prediction
+            # -----------------------------------------------------
+            prediction = self.model.predict(
+                padded,
+                verbose=0
+            )
+
+            score = float(
+                prediction[0][0]
+            )
+
+            logging.info(
+                f"Prediction score: {score}"
+            )
+
+            # Keep probability between 0 and 1
+            score = max(
+                0.0,
+                min(1.0, score)
+            )
+
+            # -----------------------------------------------------
+            # Classification
+            # -----------------------------------------------------
             if score >= 0.5:
-                return {
+
+                result = {
                     "prediction": "hate and abusive",
-                    "score": score
+                    "score": round(score, 4)
                 }
 
-            return {
-                "prediction": "no hate",
-                "score": score
-            }
+            else:
+
+                result = {
+                    "prediction": "no hate",
+                    "score": round(score, 4)
+                }
+
+            logging.info(
+                f"Prediction result: {result}"
+            )
+
+            return result
 
         except Exception as e:
-            raise CustomException(e, sys)
 
-    # ---------------------------------------------------------
+            logging.error(
+                f"Prediction failed: {str(e)}"
+            )
+
+            raise CustomException(e, sys) from e
+
+    # =============================================================
+    # PIPELINE
+    # =============================================================
 
     def run_pipeline(self, text):
 

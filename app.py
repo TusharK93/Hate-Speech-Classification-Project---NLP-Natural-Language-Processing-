@@ -1,83 +1,126 @@
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse, PlainTextResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-import uvicorn
 import sys
 
-from hate.pipeline.train_pipeline import TrainPipeline
 from hate.pipeline.prediction_pipeline import PredictionPipeline
 from hate.exception import CustomException
-from hate.constants import APP_HOST, APP_PORT
 
+
+# ============================================================
+# FASTAPI APPLICATION
+# ============================================================
 
 app = FastAPI(
     title="Hate Speech Detection API",
+    description="NLP-based Hate Speech and Abusive Text Classification API",
     version="1.0.0"
 )
 
 
-# -----------------------------
-# Request Model
-# -----------------------------
+# ============================================================
+# REQUEST MODEL
+# ============================================================
+
 class TextRequest(BaseModel):
     text: str
 
 
-# -----------------------------
-# Home Route
-# -----------------------------
+# ============================================================
+# LOAD PREDICTION PIPELINE ONCE
+# ============================================================
+
+try:
+    prediction_pipeline = PredictionPipeline()
+except Exception as e:
+    prediction_pipeline = None
+    print(f"Prediction pipeline initialization failed: {e}")
+
+
+# ============================================================
+# HOME
+# ============================================================
+
 @app.get("/", tags=["Home"])
 async def home():
-    return RedirectResponse(url="/docs")
+
+    return RedirectResponse(
+        url="/docs"
+    )
 
 
-# -----------------------------
-# Training Route
-# -----------------------------
-@app.get("/train", tags=["Training"])
-async def train():
-    try:
-        train_pipeline = TrainPipeline()
-        train_pipeline.run_pipeline()
+# ============================================================
+# HEALTH CHECK
+# ============================================================
 
-        return PlainTextResponse(
-            content="Training completed successfully!",
-            status_code=200
-        )
+@app.get("/health", tags=["Health"])
+async def health():
 
-    except Exception as e:
-        return PlainTextResponse(
-            content=f"Training failed: {str(e)}",
-            status_code=500
-        )
-
-
-# -----------------------------
-# Prediction Route
-# -----------------------------
-@app.post("/predict", tags=["Prediction"])
-async def predict(request: TextRequest):
-    try:
-        pipeline = PredictionPipeline()
-
-        prediction = pipeline.run_pipeline(request.text)
+    if prediction_pipeline is None:
 
         return {
+            "status": "unhealthy",
+            "model_loaded": False
+        }
+
+    return {
+        "status": "healthy",
+        "model_loaded": True
+    }
+
+
+# ============================================================
+# PREDICTION
+# ============================================================
+
+@app.post("/predict", tags=["Prediction"])
+async def predict(request: TextRequest):
+
+    try:
+
+        if prediction_pipeline is None:
+
+            return {
+                "status": "error",
+                "message": "Prediction model is not loaded."
+            }
+
+        if not request.text.strip():
+
+            return {
+                "status": "error",
+                "message": "Text cannot be empty."
+            }
+
+        result = prediction_pipeline.run_pipeline(
+            request.text
+        )
+
+        return {
+            "status": "success",
             "input": request.text,
-            "prediction": prediction
+            **result
         }
 
     except Exception as e:
-        raise CustomException(e, sys)
+
+        raise CustomException(
+            e,
+            sys
+        ) from e
 
 
-# -----------------------------
-# Run Application
-# -----------------------------
+# ============================================================
+# LOCAL DEVELOPMENT
+# ============================================================
+
 if __name__ == "__main__":
+
+    import uvicorn
+
     uvicorn.run(
         "app:app",
-        host=APP_HOST,
-        port=APP_PORT,
-        reload=True
+        host="0.0.0.0",
+        port=8000,
+        reload=False
     )

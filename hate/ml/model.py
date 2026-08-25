@@ -1,28 +1,51 @@
-# Creating model architecture.
-from hate.entity.config_entity import ModelTrainerConfig
-from keras.models import Sequential
-from keras.optimizers import RMSprop
-from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras.layers import LSTM,Activation,Dense,Dropout,Input,Embedding,SpatialDropout1D
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Embedding, LSTM
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from hate.constants import *
+from tensorflow.keras.layers import Embedding, LSTM, Dense, SpatialDropout1D
+from tensorflow.keras.optimizers import RMSprop
+
+from hate.constants import (
+    MAX_WORDS,
+    MAX_LEN,
+    ACTIVATION,
+    LOSS,
+    METRICS
+)
+
 
 class ModelArchitecture:
 
     def __init__(self):
         pass
 
-    
     def get_model(self):
-        model = Sequential()
-        model.add(Embedding(MAX_WORDS, 100,input_length=MAX_LEN))
-        model.add(SpatialDropout1D(0.2))
-        model.add(LSTM(100,dropout=0.2,recurrent_dropout=0.2))
-        model.add(Dense(1,activation=ACTIVATION))
+
+        # Lightweight model for low-memory deployment
+        model = Sequential([
+            Embedding(
+                input_dim=MAX_WORDS,
+                output_dim=32,
+                input_length=MAX_LEN
+            ),
+
+            SpatialDropout1D(0.2),
+
+            LSTM(
+                32,
+                dropout=0.1,
+                recurrent_dropout=0.0
+            ),
+
+            Dense(
+                1,
+                activation=ACTIVATION
+            )
+        ])
+
+        model.compile(
+            loss=LOSS,
+            optimizer=RMSprop(learning_rate=0.001),
+            metrics=METRICS
+        )
+
         model.summary()
-        model.compile(loss=LOSS,optimizer=RMSprop(),metrics=METRICS)
 
         return model
