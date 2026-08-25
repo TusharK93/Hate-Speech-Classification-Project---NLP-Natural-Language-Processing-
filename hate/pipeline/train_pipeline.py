@@ -7,12 +7,14 @@ from hate.components.data_ingestion import DataIngestion
 from hate.components.data_transformation import DataTransformation
 from hate.components.model_trainer import ModelTrainer
 from hate.components.model_evaluation import ModelEvaluation
+from hate.components.model_pusher import ModelPusher
 
 from hate.entity.config_entity import (
     DataIngestionConfig,
     DataTransformationConfig,
     ModelTrainerConfig,
     ModelEvaluationConfig,
+    ModelPusherConfig
 )
 
 from hate.entity.artifact_entity import (
@@ -20,6 +22,7 @@ from hate.entity.artifact_entity import (
     DataTransformationArtifacts,
     ModelTrainerArtifacts,
     ModelEvaluationArtifacts,
+    ModelPusherArtifacts
 )
 
 
@@ -27,112 +30,118 @@ class TrainPipeline:
 
     def __init__(self):
 
-        # -------------------------------------------------
-        # Configuration
-        # -------------------------------------------------
-
-        self.data_ingestion_config = DataIngestionConfig()
+        self.data_ingestion_config = (
+            DataIngestionConfig()
+        )
 
         self.data_transformation_config = (
             DataTransformationConfig()
         )
 
-        self.model_trainer_config = ModelTrainerConfig()
-
-        self.model_evaluation_config = ModelEvaluationConfig()
-
-    # =====================================================
-    # DATA INGESTION
-    # =====================================================
-
-    def start_data_ingestion(self) -> DataIngestionArtifacts:
-
-        logging.info(
-            "Entered start_data_ingestion method"
+        self.model_trainer_config = (
+            ModelTrainerConfig()
         )
+
+        self.model_evaluation_config = (
+            ModelEvaluationConfig()
+        )
+
+        self.model_pusher_config = (
+            ModelPusherConfig()
+        )
+
+    # ==========================================================
+    # DATA INGESTION
+    # ==========================================================
+
+    def start_data_ingestion(self):
 
         try:
 
             logging.info(
-                "Getting data from GCloud Storage bucket"
+                "Starting data ingestion."
             )
 
             data_ingestion = DataIngestion(
-                data_ingestion_config=self.data_ingestion_config
+                data_ingestion_config=(
+                    self.data_ingestion_config
+                )
             )
 
-            data_ingestion_artifacts = (
-                data_ingestion.initiate_data_ingestion()
+            artifacts = (
+                data_ingestion
+                .initiate_data_ingestion()
             )
 
             logging.info(
-                "Train and validation data obtained successfully"
+                "Data ingestion completed."
             )
 
-            logging.info(
-                "Exited start_data_ingestion method"
-            )
-
-            return data_ingestion_artifacts
+            return artifacts
 
         except Exception as e:
 
-            raise CustomException(e, sys) from e
+            raise CustomException(
+                e,
+                sys
+            ) from e
 
-    # =====================================================
+    # ==========================================================
     # DATA TRANSFORMATION
-    # =====================================================
+    # ==========================================================
 
     def start_data_transformation(
         self,
-        data_ingestion_artifacts: DataIngestionArtifacts,
-    ) -> DataTransformationArtifacts:
-
-        logging.info(
-            "Entered start_data_transformation method"
-        )
+        data_ingestion_artifacts
+    ):
 
         try:
 
+            logging.info(
+                "Starting data transformation."
+            )
+
             data_transformation = DataTransformation(
-                data_ingestion_artifacts=data_ingestion_artifacts,
+                data_ingestion_artifacts=(
+                    data_ingestion_artifacts
+                ),
                 data_transformation_config=(
                     self.data_transformation_config
-                ),
+                )
             )
 
-            data_transformation_artifacts = (
-                data_transformation.initiate_data_transformation()
-            )
-
-            logging.info(
-                "Data transformation completed successfully"
+            artifacts = (
+                data_transformation
+                .initiate_data_transformation()
             )
 
             logging.info(
-                "Exited start_data_transformation method"
+                "Data transformation completed."
             )
 
-            return data_transformation_artifacts
+            return artifacts
 
         except Exception as e:
 
-            raise CustomException(e, sys) from e
+            raise CustomException(
+                e,
+                sys
+            ) from e
 
-    # =====================================================
-    # MODEL TRAINING
-    # =====================================================
+    # ==========================================================
+    # MODEL TRAINER
+    # ==========================================================
 
     def start_model_trainer(
         self,
-        data_transformation_artifacts: DataTransformationArtifacts,
-    ) -> ModelTrainerArtifacts:
-
-        logging.info(
-            "Entered start_model_trainer method"
-        )
+        data_transformation_artifacts
+    ):
 
         try:
+
+            logging.info(
+                "Starting model training."
+            )
 
             model_trainer = ModelTrainer(
                 data_transformation_artifacts=(
@@ -140,42 +149,42 @@ class TrainPipeline:
                 ),
                 model_trainer_config=(
                     self.model_trainer_config
-                ),
+                )
             )
 
-            model_trainer_artifacts = (
-                model_trainer.initiate_model_trainer()
-            )
-
-            logging.info(
-                "Model training completed successfully"
+            artifacts = (
+                model_trainer
+                .initiate_model_trainer()
             )
 
             logging.info(
-                "Exited start_model_trainer method"
+                "Model training completed."
             )
 
-            return model_trainer_artifacts
+            return artifacts
 
         except Exception as e:
 
-            raise CustomException(e, sys) from e
+            raise CustomException(
+                e,
+                sys
+            ) from e
 
-    # =====================================================
+    # ==========================================================
     # MODEL EVALUATION
-    # =====================================================
+    # ==========================================================
 
     def start_model_evaluation(
         self,
-        model_trainer_artifacts: ModelTrainerArtifacts,
-        data_transformation_artifacts: DataTransformationArtifacts,
-    ) -> ModelEvaluationArtifacts:
-
-        logging.info(
-            "Entered start_model_evaluation method"
-        )
+        model_trainer_artifacts,
+        data_transformation_artifacts
+    ):
 
         try:
+
+            logging.info(
+                "Starting model evaluation."
+            )
 
             model_evaluation = ModelEvaluation(
                 data_transformation_artifacts=(
@@ -186,175 +195,124 @@ class TrainPipeline:
                 ),
                 model_trainer_artifacts=(
                     model_trainer_artifacts
-                ),
+                )
             )
 
-            model_evaluation_artifacts = (
-                model_evaluation.initiate_model_evaluation()
-            )
-
-            logging.info(
-                "Model evaluation completed successfully"
+            artifacts = (
+                model_evaluation
+                .initiate_model_evaluation()
             )
 
             logging.info(
-                "Exited start_model_evaluation method"
+                "Model evaluation completed."
             )
 
-            return model_evaluation_artifacts
+            return artifacts
 
         except Exception as e:
 
-            raise CustomException(e, sys) from e
+            raise CustomException(
+                e,
+                sys
+            ) from e
 
-    # =====================================================
-    # COMPLETE TRAINING PIPELINE
-    # =====================================================
+    # ==========================================================
+    # MODEL PUSHER
+    # ==========================================================
 
-    def run_pipeline(self) -> None:
-
-        logging.info(
-            "Entered run_pipeline method"
-        )
+    def start_model_pusher(self):
 
         try:
 
-            # -------------------------------------------------
-            # 1. Data Ingestion
-            # -------------------------------------------------
-
             logging.info(
-                "STEP 1: Starting data ingestion"
+                "Starting model pusher."
             )
 
+            model_pusher = ModelPusher(
+                model_pusher_config=(
+                    self.model_pusher_config
+                )
+            )
+
+            artifacts = (
+                model_pusher
+                .initiate_model_pusher()
+            )
+
+            logging.info(
+                "Model pusher completed."
+            )
+
+            return artifacts
+
+        except Exception as e:
+
+            raise CustomException(
+                e,
+                sys
+            ) from e
+
+    # ==========================================================
+    # COMPLETE TRAINING PIPELINE
+    # ==========================================================
+
+    def run_pipeline(self):
+
+        try:
+
+            logging.info(
+                "Starting complete training pipeline."
+            )
+
+            # 1. Data ingestion
             data_ingestion_artifacts = (
                 self.start_data_ingestion()
             )
 
-            logging.info(
-                "STEP 1: Data ingestion completed"
-            )
-
-            # -------------------------------------------------
-            # 2. Data Transformation
-            # -------------------------------------------------
-
-            logging.info(
-                "STEP 2: Starting data transformation"
-            )
-
+            # 2. Data transformation
             data_transformation_artifacts = (
                 self.start_data_transformation(
-                    data_ingestion_artifacts=(
-                        data_ingestion_artifacts
-                    )
+                    data_ingestion_artifacts
                 )
             )
 
-            logging.info(
-                "STEP 2: Data transformation completed"
-            )
-
-            # -------------------------------------------------
-            # 3. Model Training
-            # -------------------------------------------------
-
-            logging.info(
-                "STEP 3: Starting model training"
-            )
-
+            # 3. Model training
             model_trainer_artifacts = (
                 self.start_model_trainer(
-                    data_transformation_artifacts=(
-                        data_transformation_artifacts
-                    )
+                    data_transformation_artifacts
                 )
             )
 
-            logging.info(
-                "STEP 3: Model training completed"
-            )
-
-            # -------------------------------------------------
-            # 4. Model Evaluation
-            # -------------------------------------------------
-
-            logging.info(
-                "STEP 4: Starting model evaluation"
-            )
-
+            # 4. Model evaluation
             model_evaluation_artifacts = (
                 self.start_model_evaluation(
-                    model_trainer_artifacts=(
-                        model_trainer_artifacts
-                    ),
-                    data_transformation_artifacts=(
-                        data_transformation_artifacts
-                    ),
+                    model_trainer_artifacts,
+                    data_transformation_artifacts
                 )
             )
 
-            logging.info(
-                "STEP 4: Model evaluation completed"
-            )
-
-            # -------------------------------------------------
-            # 5. Check Model Acceptance
-            # -------------------------------------------------
-
+            # 5. Check model
             if not model_evaluation_artifacts.is_model_accepted:
 
-                logging.error(
-                    "Trained model was not accepted"
-                )
-
                 raise Exception(
-                    "Trained model is not better than "
-                    "the best model"
+                    "Trained model is not better "
+                    "than the best model."
                 )
 
-            logging.info(
-                "Model accepted successfully"
-            )
-
-            # -------------------------------------------------
-            # 6. Model Pusher DISABLED
-            # -------------------------------------------------
-
-            logging.info(
-                "STEP 5: Model Pusher skipped"
+            # 6. Push model
+            model_pusher_artifacts = (
+                self.start_model_pusher()
             )
 
             logging.info(
-                "Google Cloud Model Pusher is disabled "
-                "because the GCloud billing account is closed."
+                "Complete training pipeline finished successfully."
             )
 
-            logging.info(
-                "The trained model will be deployed "
-                "directly with the application."
-            )
-
-            # -------------------------------------------------
-            # Pipeline Completed
-            # -------------------------------------------------
-
-            logging.info(
-                "=========================================="
-            )
-
-            logging.info(
-                "TRAINING PIPELINE COMPLETED SUCCESSFULLY"
-            )
-
-            logging.info(
-                "=========================================="
-            )
+            return model_pusher_artifacts
 
         except Exception as e:
 
-            logging.error(
-                "Training pipeline failed"
-            )
-
-            raise CustomException(e, sys) from e
+            raise CustomException(
+                e,
+                sys
+            ) from e

@@ -3,8 +3,8 @@ import sys
 import re
 import string
 import pickle
-import nltk
 
+import nltk
 from nltk.corpus import stopwords
 
 from tensorflow import keras
@@ -18,10 +18,12 @@ from hate.constants import MAX_LEN
 class PredictionPipeline:
 
     def __init__(self):
+
         try:
-            # ==========================================================
+            # --------------------------------------------------
             # BASE DIRECTORY
-            # ==========================================================
+            # --------------------------------------------------
+
             self.base_dir = os.path.dirname(
                 os.path.dirname(
                     os.path.dirname(
@@ -34,9 +36,10 @@ class PredictionPipeline:
                 f"Base directory: {self.base_dir}"
             )
 
-            # ==========================================================
+            # --------------------------------------------------
             # FIND MODEL
-            # ==========================================================
+            # --------------------------------------------------
+
             artifacts_dir = os.path.join(
                 self.base_dir,
                 "artifacts"
@@ -44,7 +47,7 @@ class PredictionPipeline:
 
             self.model_path = None
 
-            # Find .h5 / .keras model
+            # Search all artifacts folders
             for root, dirs, files in os.walk(artifacts_dir):
 
                 for file in files:
@@ -56,33 +59,27 @@ class PredictionPipeline:
                             file
                         )
 
-                        break
-
-                if self.model_path:
-                    break
-
             if self.model_path is None:
 
                 raise FileNotFoundError(
-                    "No trained model (.h5 or .keras) "
-                    "found inside artifacts folder."
+                    "No trained model (.h5/.keras) found "
+                    "inside artifacts folder."
                 )
 
             logging.info(
                 f"Model found at: {self.model_path}"
             )
 
-            # ==========================================================
+            # --------------------------------------------------
             # TOKENIZER
-            # ==========================================================
+            # --------------------------------------------------
+
             self.tokenizer_path = os.path.join(
                 self.base_dir,
                 "tokenizer.pickle"
             )
 
-            if not os.path.exists(
-                self.tokenizer_path
-            ):
+            if not os.path.exists(self.tokenizer_path):
 
                 raise FileNotFoundError(
                     f"Tokenizer not found at: "
@@ -90,13 +87,13 @@ class PredictionPipeline:
                 )
 
             logging.info(
-                f"Tokenizer found at: "
-                f"{self.tokenizer_path}"
+                f"Tokenizer found at: {self.tokenizer_path}"
             )
 
-            # ==========================================================
+            # --------------------------------------------------
             # LOAD TOKENIZER
-            # ==========================================================
+            # --------------------------------------------------
+
             with open(
                 self.tokenizer_path,
                 "rb"
@@ -108,9 +105,10 @@ class PredictionPipeline:
                 "Tokenizer loaded successfully."
             )
 
-            # ==========================================================
-            # NLTK STOPWORDS
-            # ==========================================================
+            # --------------------------------------------------
+            # STOPWORDS
+            # --------------------------------------------------
+
             try:
 
                 self.stop_words = set(
@@ -128,16 +126,18 @@ class PredictionPipeline:
                     stopwords.words("english")
                 )
 
-            # ==========================================================
+            # --------------------------------------------------
             # STEMMER
-            # ==========================================================
+            # --------------------------------------------------
+
             self.stemmer = nltk.SnowballStemmer(
                 "english"
             )
 
-            # ==========================================================
+            # --------------------------------------------------
             # LOAD MODEL
-            # ==========================================================
+            # --------------------------------------------------
+
             logging.info(
                 "Loading TensorFlow model..."
             )
@@ -162,9 +162,9 @@ class PredictionPipeline:
                 sys
             ) from e
 
-    # ==============================================================
+    # ----------------------------------------------------------
     # TEXT CLEANING
-    # ==============================================================
+    # ----------------------------------------------------------
 
     def clean_text(self, text):
 
@@ -214,13 +214,6 @@ class PredictionPipeline:
                 text
             )
 
-            # Remove extra spaces
-            text = re.sub(
-                r"\s+",
-                " ",
-                text
-            ).strip()
-
             # Stopword removal + stemming
             words = []
 
@@ -241,9 +234,9 @@ class PredictionPipeline:
                 sys
             ) from e
 
-    # ==============================================================
+    # ----------------------------------------------------------
     # PREDICTION
-    # ==============================================================
+    # ----------------------------------------------------------
 
     def predict(self, text):
 
@@ -313,9 +306,9 @@ class PredictionPipeline:
                 sys
             ) from e
 
-    # ==============================================================
+    # ----------------------------------------------------------
     # PIPELINE
-    # ==============================================================
+    # ----------------------------------------------------------
 
     def run_pipeline(self, text):
 

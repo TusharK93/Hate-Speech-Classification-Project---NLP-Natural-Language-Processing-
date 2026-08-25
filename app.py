@@ -7,9 +7,9 @@ from hate.pipeline.prediction_pipeline import PredictionPipeline
 from hate.exception import CustomException
 
 
-# ============================================================
+# ==========================================================
 # FASTAPI APPLICATION
-# ============================================================
+# ==========================================================
 
 app = FastAPI(
     title="Hate Speech Detection API",
@@ -18,30 +18,40 @@ app = FastAPI(
 )
 
 
-# ============================================================
+# ==========================================================
 # REQUEST MODEL
-# ============================================================
+# ==========================================================
 
 class TextRequest(BaseModel):
+
     text: str
 
 
-# ============================================================
-# LOAD PREDICTION PIPELINE ONCE
-# ============================================================
+# ==========================================================
+# LOAD MODEL
+# ==========================================================
+
+prediction_pipeline = None
 
 try:
+
     prediction_pipeline = PredictionPipeline()
+
 except Exception as e:
-    prediction_pipeline = None
-    print(f"Prediction pipeline initialization failed: {e}")
+
+    print(
+        f"Prediction pipeline initialization failed: {e}"
+    )
 
 
-# ============================================================
+# ==========================================================
 # HOME
-# ============================================================
+# ==========================================================
 
-@app.get("/", tags=["Home"])
+@app.get(
+    "/",
+    tags=["Home"]
+)
 async def home():
 
     return RedirectResponse(
@@ -49,11 +59,14 @@ async def home():
     )
 
 
-# ============================================================
+# ==========================================================
 # HEALTH CHECK
-# ============================================================
+# ==========================================================
 
-@app.get("/health", tags=["Health"])
+@app.get(
+    "/health",
+    tags=["Health"]
+)
 async def health():
 
     if prediction_pipeline is None:
@@ -69,35 +82,30 @@ async def health():
     }
 
 
-# ============================================================
+# ==========================================================
 # PREDICTION
-# ============================================================
+# ==========================================================
 
-@app.post("/predict", tags=["Prediction"])
+@app.post(
+    "/predict",
+    tags=["Prediction"]
+)
 async def predict(request: TextRequest):
 
+    if prediction_pipeline is None:
+
+        return {
+            "status": "error",
+            "message": "Prediction model is not loaded."
+        }
+
     try:
-
-        if prediction_pipeline is None:
-
-            return {
-                "status": "error",
-                "message": "Prediction model is not loaded."
-            }
-
-        if not request.text.strip():
-
-            return {
-                "status": "error",
-                "message": "Text cannot be empty."
-            }
 
         result = prediction_pipeline.run_pipeline(
             request.text
         )
 
         return {
-            "status": "success",
             "input": request.text,
             **result
         }
@@ -110,9 +118,9 @@ async def predict(request: TextRequest):
         ) from e
 
 
-# ============================================================
+# ==========================================================
 # LOCAL DEVELOPMENT
-# ============================================================
+# ==========================================================
 
 if __name__ == "__main__":
 
