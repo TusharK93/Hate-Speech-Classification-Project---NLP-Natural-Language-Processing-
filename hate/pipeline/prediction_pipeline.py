@@ -6,6 +6,7 @@ import pickle
 import nltk
 
 from nltk.corpus import stopwords
+
 from tensorflow import keras
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
@@ -21,7 +22,7 @@ class PredictionPipeline:
             # ==========================================================
             # BASE DIRECTORY
             # ==========================================================
-            BASE_DIR = os.path.dirname(
+            self.base_dir = os.path.dirname(
                 os.path.dirname(
                     os.path.dirname(
                         os.path.abspath(__file__)
@@ -29,55 +30,73 @@ class PredictionPipeline:
                 )
             )
 
-            self.base_dir = BASE_DIR
-
-            logging.info(f"Base directory: {BASE_DIR}")
-
-            # ==========================================================
-            # MODEL PATH
-            # ==========================================================
-            #
-            # Keep this pointing to the model that you want to deploy.
-            #
-            self.model_path = os.path.join(
-                BASE_DIR,
-                "artifacts",
-                "08_26_2026_00_05_56",
-                "ModelTrainerArtifacts",
-                "model.h5"
+            logging.info(
+                f"Base directory: {self.base_dir}"
             )
 
-            if not os.path.exists(self.model_path):
+            # ==========================================================
+            # FIND MODEL
+            # ==========================================================
+            artifacts_dir = os.path.join(
+                self.base_dir,
+                "artifacts"
+            )
+
+            self.model_path = None
+
+            # Find .h5 / .keras model
+            for root, dirs, files in os.walk(artifacts_dir):
+
+                for file in files:
+
+                    if file.endswith(".h5") or file.endswith(".keras"):
+
+                        self.model_path = os.path.join(
+                            root,
+                            file
+                        )
+
+                        break
+
+                if self.model_path:
+                    break
+
+            if self.model_path is None:
+
                 raise FileNotFoundError(
-                    f"Trained model not found at: {self.model_path}"
+                    "No trained model (.h5 or .keras) "
+                    "found inside artifacts folder."
                 )
 
             logging.info(
-                f"Trained model found at: {self.model_path}"
+                f"Model found at: {self.model_path}"
             )
 
             # ==========================================================
-            # TOKENIZER PATH
+            # TOKENIZER
             # ==========================================================
-
             self.tokenizer_path = os.path.join(
-                BASE_DIR,
+                self.base_dir,
                 "tokenizer.pickle"
             )
 
-            if not os.path.exists(self.tokenizer_path):
+            if not os.path.exists(
+                self.tokenizer_path
+            ):
+
                 raise FileNotFoundError(
-                    f"Tokenizer not found at: {self.tokenizer_path}"
+                    f"Tokenizer not found at: "
+                    f"{self.tokenizer_path}"
                 )
 
             logging.info(
-                f"Tokenizer found at: {self.tokenizer_path}"
+                f"Tokenizer found at: "
+                f"{self.tokenizer_path}"
             )
 
             # ==========================================================
             # LOAD TOKENIZER
             # ==========================================================
-
             with open(
                 self.tokenizer_path,
                 "rb"
@@ -90,10 +109,10 @@ class PredictionPipeline:
             )
 
             # ==========================================================
-            # LOAD NLTK STOPWORDS
+            # NLTK STOPWORDS
             # ==========================================================
-
             try:
+
                 self.stop_words = set(
                     stopwords.words("english")
                 )
@@ -112,7 +131,6 @@ class PredictionPipeline:
             # ==========================================================
             # STEMMER
             # ==========================================================
-
             self.stemmer = nltk.SnowballStemmer(
                 "english"
             )
@@ -120,7 +138,6 @@ class PredictionPipeline:
             # ==========================================================
             # LOAD MODEL
             # ==========================================================
-
             logging.info(
                 "Loading TensorFlow model..."
             )
@@ -137,7 +154,7 @@ class PredictionPipeline:
         except Exception as e:
 
             logging.error(
-                f"Error initializing PredictionPipeline: {str(e)}"
+                f"Prediction pipeline initialization failed: {str(e)}"
             )
 
             raise CustomException(
@@ -153,11 +170,7 @@ class PredictionPipeline:
 
         try:
 
-            # Convert to string
-            text = str(text)
-
-            # Lowercase
-            text = text.lower()
+            text = str(text).lower()
 
             # Remove square brackets
             text = re.sub(
@@ -219,9 +232,7 @@ class PredictionPipeline:
                         self.stemmer.stem(word)
                     )
 
-            cleaned_text = " ".join(words)
-
-            return cleaned_text
+            return " ".join(words)
 
         except Exception as e:
 
@@ -242,41 +253,29 @@ class PredictionPipeline:
                 "Running hate speech prediction..."
             )
 
-            # ------------------------------------------------------
-            # Clean input text
-            # ------------------------------------------------------
-
+            # Clean text
             cleaned_text = self.clean_text(text)
 
             logging.info(
                 f"Cleaned text: {cleaned_text}"
             )
 
-            # ------------------------------------------------------
-            # Convert text into sequence
-            # ------------------------------------------------------
-
+            # Convert text to sequence
             sequence = self.tokenizer.texts_to_sequences(
                 [cleaned_text]
             )
 
-            # ------------------------------------------------------
             # Padding
-            # ------------------------------------------------------
-
-            padded_sequence = pad_sequences(
+            padded = pad_sequences(
                 sequence,
                 maxlen=MAX_LEN,
                 padding="pre",
                 truncating="pre"
             )
 
-            # ------------------------------------------------------
-            # Model prediction
-            # ------------------------------------------------------
-
+            # Prediction
             prediction = self.model.predict(
-                padded_sequence,
+                padded,
                 verbose=0
             )
 
@@ -288,29 +287,20 @@ class PredictionPipeline:
                 f"Prediction score: {score}"
             )
 
-            # ------------------------------------------------------
             # Classification
-            # ------------------------------------------------------
-
             if score >= 0.5:
 
-                result = {
+                return {
                     "prediction": "hate and abusive",
                     "score": round(score, 4)
                 }
 
             else:
 
-                result = {
+                return {
                     "prediction": "no hate",
                     "score": round(score, 4)
                 }
-
-            logging.info(
-                f"Prediction result: {result}"
-            )
-
-            return result
 
         except Exception as e:
 
@@ -329,13 +319,4 @@ class PredictionPipeline:
 
     def run_pipeline(self, text):
 
-        try:
-
-            return self.predict(text)
-
-        except Exception as e:
-
-            raise CustomException(
-                e,
-                sys
-            ) from e
+        return self.predict(text)
