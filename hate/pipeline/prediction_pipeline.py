@@ -20,9 +20,10 @@ class PredictionPipeline:
     def __init__(self):
 
         try:
-            # --------------------------------------------------
+
+            # ==================================================
             # BASE DIRECTORY
-            # --------------------------------------------------
+            # ==================================================
 
             self.base_dir = os.path.dirname(
                 os.path.dirname(
@@ -36,63 +37,115 @@ class PredictionPipeline:
                 f"Base directory: {self.base_dir}"
             )
 
-            # --------------------------------------------------
-            # FIND MODEL
-            # --------------------------------------------------
+            # ==================================================
+            # ARTIFACTS DIRECTORY
+            # ==================================================
 
             artifacts_dir = os.path.join(
                 self.base_dir,
                 "artifacts"
             )
 
-            self.model_path = None
+            if not os.path.exists(artifacts_dir):
 
-            # Search all artifacts folders
+                raise FileNotFoundError(
+                    f"Artifacts directory not found: {artifacts_dir}"
+                )
+
+            # ==================================================
+            # FIND MODEL
+            # ==================================================
+
+            model_files = []
+
             for root, dirs, files in os.walk(artifacts_dir):
 
                 for file in files:
 
                     if file.endswith(".h5") or file.endswith(".keras"):
 
-                        self.model_path = os.path.join(
-                            root,
-                            file
+                        model_files.append(
+                            os.path.join(root, file)
                         )
 
-            if self.model_path is None:
+            if not model_files:
 
                 raise FileNotFoundError(
-                    "No trained model (.h5/.keras) found "
-                    "inside artifacts folder."
+                    "No .h5 or .keras model found inside artifacts."
                 )
 
-            logging.info(
-                f"Model found at: {self.model_path}"
+            # Use latest model
+            model_files.sort(
+                key=os.path.getmtime,
+                reverse=True
             )
 
-            # --------------------------------------------------
+            self.model_path = model_files[0]
+
+            logging.info(
+                f"Model selected: {self.model_path}"
+            )
+
+            # ==================================================
             # TOKENIZER
-            # --------------------------------------------------
+            # ==================================================
 
-            self.tokenizer_path = os.path.join(
-                self.base_dir,
-                "tokenizer.pickle"
-            )
+            tokenizer_candidates = [
 
-            if not os.path.exists(self.tokenizer_path):
+                os.path.join(
+                    self.base_dir,
+                    "tokenizer.pickle"
+                ),
+
+                os.path.join(
+                    artifacts_dir,
+                    "tokenizer.pickle"
+                )
+            ]
+
+            self.tokenizer_path = None
+
+            for path in tokenizer_candidates:
+
+                if os.path.exists(path):
+
+                    self.tokenizer_path = path
+                    break
+
+            if self.tokenizer_path is None:
+
+                # Search entire project
+                for root, dirs, files in os.walk(
+                    self.base_dir
+                ):
+
+                    for file in files:
+
+                        if file == "tokenizer.pickle":
+
+                            self.tokenizer_path = os.path.join(
+                                root,
+                                file
+                            )
+
+                            break
+
+                    if self.tokenizer_path:
+                        break
+
+            if self.tokenizer_path is None:
 
                 raise FileNotFoundError(
-                    f"Tokenizer not found at: "
-                    f"{self.tokenizer_path}"
+                    "tokenizer.pickle not found."
                 )
 
             logging.info(
-                f"Tokenizer found at: {self.tokenizer_path}"
+                f"Tokenizer selected: {self.tokenizer_path}"
             )
 
-            # --------------------------------------------------
+            # ==================================================
             # LOAD TOKENIZER
-            # --------------------------------------------------
+            # ==================================================
 
             with open(
                 self.tokenizer_path,
@@ -105,9 +158,9 @@ class PredictionPipeline:
                 "Tokenizer loaded successfully."
             )
 
-            # --------------------------------------------------
-            # STOPWORDS
-            # --------------------------------------------------
+            # ==================================================
+            # NLTK STOPWORDS
+            # ==================================================
 
             try:
 
@@ -126,17 +179,17 @@ class PredictionPipeline:
                     stopwords.words("english")
                 )
 
-            # --------------------------------------------------
+            # ==================================================
             # STEMMER
-            # --------------------------------------------------
+            # ==================================================
 
             self.stemmer = nltk.SnowballStemmer(
                 "english"
             )
 
-            # --------------------------------------------------
+            # ==================================================
             # LOAD MODEL
-            # --------------------------------------------------
+            # ==================================================
 
             logging.info(
                 "Loading TensorFlow model..."
@@ -151,10 +204,14 @@ class PredictionPipeline:
                 "TensorFlow model loaded successfully."
             )
 
+            logging.info(
+                "PredictionPipeline initialized successfully."
+            )
+
         except Exception as e:
 
             logging.error(
-                f"Prediction pipeline initialization failed: {str(e)}"
+                f"Prediction pipeline initialization failed: {e}"
             )
 
             raise CustomException(
@@ -162,9 +219,9 @@ class PredictionPipeline:
                 sys
             ) from e
 
-    # ----------------------------------------------------------
+    # ==========================================================
     # TEXT CLEANING
-    # ----------------------------------------------------------
+    # ==========================================================
 
     def clean_text(self, text):
 
@@ -215,6 +272,7 @@ class PredictionPipeline:
             )
 
             # Stopword removal + stemming
+
             words = []
 
             for word in text.split():
@@ -234,9 +292,9 @@ class PredictionPipeline:
                 sys
             ) from e
 
-    # ----------------------------------------------------------
+    # ==========================================================
     # PREDICTION
-    # ----------------------------------------------------------
+    # ==========================================================
 
     def predict(self, text):
 
@@ -246,14 +304,10 @@ class PredictionPipeline:
                 "Running hate speech prediction..."
             )
 
-            # Clean text
+            # Clean
             cleaned_text = self.clean_text(text)
 
-            logging.info(
-                f"Cleaned text: {cleaned_text}"
-            )
-
-            # Convert text to sequence
+            # Tokenize
             sequence = self.tokenizer.texts_to_sequences(
                 [cleaned_text]
             )
@@ -288,17 +342,15 @@ class PredictionPipeline:
                     "score": round(score, 4)
                 }
 
-            else:
-
-                return {
-                    "prediction": "no hate",
-                    "score": round(score, 4)
-                }
+            return {
+                "prediction": "no hate",
+                "score": round(score, 4)
+            }
 
         except Exception as e:
 
             logging.error(
-                f"Prediction failed: {str(e)}"
+                f"Prediction failed: {e}"
             )
 
             raise CustomException(
@@ -306,9 +358,9 @@ class PredictionPipeline:
                 sys
             ) from e
 
-    # ----------------------------------------------------------
+    # ==========================================================
     # PIPELINE
-    # ----------------------------------------------------------
+    # ==========================================================
 
     def run_pipeline(self, text):
 

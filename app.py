@@ -1,43 +1,35 @@
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-import sys
 
 from hate.pipeline.prediction_pipeline import PredictionPipeline
-from hate.exception import CustomException
 
-
-# ==========================================================
-# FASTAPI APPLICATION
-# ==========================================================
 
 app = FastAPI(
     title="Hate Speech Detection API",
-    description="NLP-based Hate Speech and Abusive Text Classification API",
-    version="1.0.0"
+    version="1.0.0",
+    description="NLP-based Hate Speech and Abusive Text Classification API"
 )
 
 
-# ==========================================================
-# REQUEST MODEL
-# ==========================================================
-
 class TextRequest(BaseModel):
-
     text: str
 
 
 # ==========================================================
-# LOAD MODEL
+# LOAD MODEL ONCE
 # ==========================================================
-
-prediction_pipeline = None
 
 try:
 
     prediction_pipeline = PredictionPipeline()
 
+    MODEL_LOADED = True
+
 except Exception as e:
+
+    prediction_pipeline = None
+    MODEL_LOADED = False
 
     print(
         f"Prediction pipeline initialization failed: {e}"
@@ -48,10 +40,7 @@ except Exception as e:
 # HOME
 # ==========================================================
 
-@app.get(
-    "/",
-    tags=["Home"]
-)
+@app.get("/")
 async def home():
 
     return RedirectResponse(
@@ -60,25 +49,15 @@ async def home():
 
 
 # ==========================================================
-# HEALTH CHECK
+# HEALTH
 # ==========================================================
 
-@app.get(
-    "/health",
-    tags=["Health"]
-)
+@app.get("/health")
 async def health():
 
-    if prediction_pipeline is None:
-
-        return {
-            "status": "unhealthy",
-            "model_loaded": False
-        }
-
     return {
-        "status": "healthy",
-        "model_loaded": True
+        "status": "healthy" if MODEL_LOADED else "unhealthy",
+        "model_loaded": MODEL_LOADED
     }
 
 
@@ -86,13 +65,10 @@ async def health():
 # PREDICTION
 # ==========================================================
 
-@app.post(
-    "/predict",
-    tags=["Prediction"]
-)
+@app.post("/predict")
 async def predict(request: TextRequest):
 
-    if prediction_pipeline is None:
+    if not MODEL_LOADED:
 
         return {
             "status": "error",
@@ -106,20 +82,21 @@ async def predict(request: TextRequest):
         )
 
         return {
+            "status": "success",
             "input": request.text,
             **result
         }
 
     except Exception as e:
 
-        raise CustomException(
-            e,
-            sys
-        ) from e
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 
 # ==========================================================
-# LOCAL DEVELOPMENT
+# LOCAL
 # ==========================================================
 
 if __name__ == "__main__":
