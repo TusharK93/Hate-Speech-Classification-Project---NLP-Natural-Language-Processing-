@@ -1,5 +1,14 @@
+at means Render is not actually using the same Keras/TensorFlow environment as your local test, or the .h5 model was saved with a Keras configuration that Render's installed Keras is interpreting differently.
+
+The safest fix is to make the deployment environment deterministic and, because your model is already confirmed to load locally, use the exact same model-loading environment on Render.
+
+Also, your current _find_model() dynamically chooses the newest .h5/.keras. I recommend removing that ambiguity and explicitly selecting the model.
+
+1. First replace prediction_pipeline.py
+
+Use this complete version:
+
 import os
-import sys
 import re
 import string
 import json
@@ -13,7 +22,6 @@ from tensorflow import keras
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 from hate.logger import logging
-from hate.exception import CustomException
 from hate.constants import MAX_LEN
 
 
@@ -21,11 +29,16 @@ class PredictionPipeline:
 
     def __init__(self):
 
+        self.model = None
+        self.tokenizer = None
+        self.model_loaded = False
+        self.initialization_error = None
+
         try:
 
-            # ==================================================
-            # BASE DIRECTORY
-            # ==================================================
+            # ==========================================================
+            # PROJECT BASE DIRECTORY
+            # ==========================================================
 
             self.base_dir = os.path.dirname(
                 os.path.dirname(
@@ -39,10 +52,9 @@ class PredictionPipeline:
                 f"Project base directory: {self.base_dir}"
             )
 
-
-            # ==================================================
+            # ==========================================================
             # ARTIFACTS DIRECTORY
-            # ==================================================
+            # ==========================================================
 
             self.artifacts_dir = os.path.join(
                 self.base_dir,
@@ -53,10 +65,15 @@ class PredictionPipeline:
                 f"Artifacts directory: {self.artifacts_dir}"
             )
 
+            if not os.path.exists(self.artifacts_dir):
+                raise FileNotFoundError(
+                    f"Artifacts directory not found: "
+                    f"{self.artifacts_dir}"
+                )
 
-            # ==================================================
+            # ==========================================================
             # FIND MODEL
-            # ==================================================
+            # ==========================================================
 
             self.model_path = self._find_model()
 
@@ -64,10 +81,14 @@ class PredictionPipeline:
                 f"Selected model: {self.model_path}"
             )
 
+            if not os.path.exists(self.model_path):
+                raise FileNotFoundError(
+                    f"Model not found: {self.model_path}"
+                )
 
-            # ==================================================
-            # TOKENIZER JSON
-            # ==================================================
+            # ==========================================================
+            # TOKENIZER
+            # ==========================================================
 
             self.tokenizer_path = os.path.join(
                 self.base_dir,
@@ -75,7 +96,6 @@ class PredictionPipeline:
             )
 
             if not os.path.exists(self.tokenizer_path):
-
                 raise FileNotFoundError(
                     f"tokenizer.json not found at: "
                     f"{self.tokenizer_path}"
@@ -85,24 +105,17 @@ class PredictionPipeline:
                 f"Tokenizer found: {self.tokenizer_path}"
             )
 
-
-            # ==================================================
-            # LOAD TOKENIZER
-            # ==================================================
-
             self.tokenizer = self._load_tokenizer()
 
             logging.info(
                 "Tokenizer loaded successfully."
             )
 
-
-            # ==================================================
-            # STOPWORDS
-            # ==================================================
+            # ==========================================================
+            # NLTK STOPWORDS
+            # ==========================================================
 
             try:
-
                 self.stop_words = set(
                     stopwords.words("english")
                 )
@@ -118,37 +131,49 @@ class PredictionPipeline:
                     stopwords.words("english")
                 )
 
-
-            # ==================================================
+            # ==========================================================
             # STEMMER
-            # ==================================================
+            # ==========================================================
 
             self.stemmer = nltk.SnowballStemmer(
                 "english"
             )
 
-
-            # ==================================================
+            # ==========================================================
             # LOAD MODEL
-            # ==================================================
+            # ==========================================================
 
             logging.info(
-                "Loading TensorFlow model..."
+                "Loading TensorFlow/Keras model..."
             )
 
+            logging.info(
+                f"TensorFlow version: "
+                f"{__import__('tensorflow').__version__}"
+            )
+
+            logging.info(
+                f"Keras version: {keras.__version__}"
+            )
+
+            logging.info(
+                f"Model path: {self.model_path}"
+            )
+
+            # IMPORTANT:
+            # compile=False avoids loading optimizer/training state.
             self.model = keras.models.load_model(
                 self.model_path,
                 compile=False
             )
 
             logging.info(
-                "TensorFlow model loaded successfully."
+                "TensorFlow/Keras model loaded successfully."
             )
 
-
-            # ==================================================
+            # ==========================================================
             # MODEL STATUS
-            # ==================================================
+            # ==========================================================
 
             self.model_loaded = True
 
@@ -156,31 +181,24 @@ class PredictionPipeline:
                 "Prediction pipeline initialized successfully."
             )
 
-
         except Exception as e:
 
             self.model = None
             self.tokenizer = None
             self.model_loaded = False
+            self.initialization_error = str(e)
 
             logging.exception(
                 "Prediction pipeline initialization failed."
             )
 
-            # Do NOT crash FastAPI completely.
-            # This allows /health to report the real problem.
-
-            self.initialization_error = str(e)
-
-
-    # ==========================================================
+    # ==============================================================
     # FIND MODEL
-    # ==========================================================
+    # ==============================================================
 
     def _find_model(self):
 
         if not os.path.exists(self.artifacts_dir):
-
             raise FileNotFoundError(
                 f"Artifacts directory not found: "
                 f"{self.artifacts_dir}"
@@ -195,7 +213,6 @@ class PredictionPipeline:
             for file in files:
 
                 if file.endswith(".h5"):
-
                     model_files.append(
                         os.path.join(
                             root,
@@ -204,7 +221,6 @@ class PredictionPipeline:
                     )
 
                 elif file.endswith(".keras"):
-
                     model_files.append(
                         os.path.join(
                             root,
@@ -212,30 +228,35 @@ class PredictionPipeline:
                         )
                     )
 
-
         if not model_files:
-
             raise FileNotFoundError(
                 "No .h5 or .keras model found "
                 "inside artifacts directory."
             )
 
+        # Log every model found
+        for model in model_files:
+            logging.info(
+                f"Found model: {model}"
+            )
 
-        # ======================================================
         # Select newest model
-        # ======================================================
-
         model_files.sort(
             key=os.path.getmtime,
             reverse=True
         )
 
-        return model_files[0]
+        selected_model = model_files[0]
 
+        logging.info(
+            f"Using newest model: {selected_model}"
+        )
 
-    # ==========================================================
-    # LOAD TOKENIZER FROM JSON
-    # ==========================================================
+        return selected_model
+
+    # ==============================================================
+    # LOAD TOKENIZER
+    # ==============================================================
 
     def _load_tokenizer(self):
 
@@ -247,54 +268,78 @@ class PredictionPipeline:
 
             tokenizer_config = json.load(f)
 
-
-        # ======================================================
-        # Keras tokenizer JSON structure
-        # ======================================================
+        if "config" not in tokenizer_config:
+            raise ValueError(
+                "Invalid tokenizer.json: missing 'config'."
+            )
 
         config = tokenizer_config["config"]
 
+        # ----------------------------------------------------------
+        # Decode JSON values
+        # ----------------------------------------------------------
 
-        # Keras JSON values can be encoded strings
         def decode_value(value):
 
             if isinstance(value, str):
 
                 try:
-
                     return json.loads(value)
 
                 except Exception:
-
                     return value
 
             return value
 
-
         word_counts = decode_value(
-            config.get("word_counts", "{}")
+            config.get(
+                "word_counts",
+                "{}"
+            )
         )
 
         word_docs = decode_value(
-            config.get("word_docs", "{}")
+            config.get(
+                "word_docs",
+                "{}"
+            )
         )
 
         index_docs = decode_value(
-            config.get("index_docs", "{}")
+            config.get(
+                "index_docs",
+                "{}"
+            )
         )
 
         index_word = decode_value(
-            config.get("index_word", "{}")
+            config.get(
+                "index_word",
+                "{}"
+            )
         )
 
         word_index = decode_value(
-            config.get("word_index", "{}")
+            config.get(
+                "word_index",
+                "{}"
+            )
         )
 
+        # ----------------------------------------------------------
+        # Normalize dictionaries
+        # ----------------------------------------------------------
 
-        # ======================================================
-        # Normalize dictionary keys
-        # ======================================================
+        if not isinstance(word_index, dict):
+            raise ValueError(
+                "Invalid tokenizer: word_index is not a dictionary."
+            )
+
+        if not isinstance(index_word, dict):
+            index_word = {}
+
+        if not isinstance(index_docs, dict):
+            index_docs = {}
 
         index_word = {
             int(k): v
@@ -306,16 +351,16 @@ class PredictionPipeline:
             for k, v in index_docs.items()
         }
 
-
-        # ======================================================
-        # Custom tokenizer object
-        # ======================================================
+        # ==========================================================
+        # CUSTOM TOKENIZER
+        # ==========================================================
 
         class JSONTokenizer:
 
             def __init__(self):
 
                 self.word_index = word_index
+
                 self.index_word = index_word
 
                 self.num_words = config.get(
@@ -326,14 +371,12 @@ class PredictionPipeline:
                 if self.num_words is not None:
 
                     try:
-
                         self.num_words = int(
                             self.num_words
                         )
 
                     except Exception:
-
-                        pass
+                        self.num_words = None
 
                 self.oov_token = config.get(
                     "oov_token",
@@ -350,7 +393,6 @@ class PredictionPipeline:
                     " "
                 )
 
-
             def texts_to_sequences(
                 self,
                 texts
@@ -358,27 +400,21 @@ class PredictionPipeline:
 
                 sequences = []
 
-
                 for text in texts:
 
                     if text is None:
-
                         text = ""
 
                     text = str(text)
 
-
                     if self.lower:
-
                         text = text.lower()
-
 
                     words = text.split(
                         self.split
                     )
 
                     sequence = []
-
 
                     for word in words:
 
@@ -396,11 +432,8 @@ class PredictionPipeline:
 
                             continue
 
-
                         if index is None:
-
                             continue
-
 
                         if (
                             self.num_words is None
@@ -411,19 +444,17 @@ class PredictionPipeline:
                                 int(index)
                             )
 
-
-                    sequences.append(sequence)
-
+                    sequences.append(
+                        sequence
+                    )
 
                 return sequences
 
-
         return JSONTokenizer()
 
-
-    # ==========================================================
-    # TEXT CLEANING
-    # ==========================================================
+    # ==============================================================
+    # CLEAN TEXT
+    # ==============================================================
 
     def clean_text(
         self,
@@ -432,44 +463,28 @@ class PredictionPipeline:
 
         text = str(text).lower()
 
-
-        # ------------------------------------------------------
         # Remove square brackets
-        # ------------------------------------------------------
-
         text = re.sub(
             r"\[.*?\]",
             "",
             text
         )
 
-
-        # ------------------------------------------------------
         # Remove URLs
-        # ------------------------------------------------------
-
         text = re.sub(
             r"https?://\S+|www\.\S+",
             "",
             text
         )
 
-
-        # ------------------------------------------------------
         # Remove HTML
-        # ------------------------------------------------------
-
         text = re.sub(
             r"<.*?>",
             "",
             text
         )
 
-
-        # ------------------------------------------------------
         # Remove punctuation
-        # ------------------------------------------------------
-
         text = re.sub(
             "[%s]" % re.escape(
                 string.punctuation
@@ -478,33 +493,21 @@ class PredictionPipeline:
             text
         )
 
-
-        # ------------------------------------------------------
         # Remove newline
-        # ------------------------------------------------------
-
         text = re.sub(
             r"\n",
-            "",
+            " ",
             text
         )
 
-
-        # ------------------------------------------------------
         # Remove words containing numbers
-        # ------------------------------------------------------
-
         text = re.sub(
             r"\w*\d\w*",
             "",
             text
         )
 
-
-        # ------------------------------------------------------
-        # Stopword removal + stemming
-        # ------------------------------------------------------
-
+        # Stopwords + stemming
         words = []
 
         for word in text.split():
@@ -515,13 +518,11 @@ class PredictionPipeline:
                     self.stemmer.stem(word)
                 )
 
-
         return " ".join(words)
 
-
-    # ==========================================================
+    # ==============================================================
     # PREDICTION
-    # ==========================================================
+    # ==============================================================
 
     def predict(
         self,
@@ -530,19 +531,23 @@ class PredictionPipeline:
 
         try:
 
+            # ------------------------------------------------------
+            # MODEL CHECK
+            # ------------------------------------------------------
+
             if not self.model_loaded:
 
                 return {
                     "status": "error",
                     "message": (
-                        "Prediction model is not loaded."
+                        "Prediction model is not loaded.",
+                        self.initialization_error
                     )
                 }
 
-
-            # --------------------------------------------------
-            # Validate input
-            # --------------------------------------------------
+            # ------------------------------------------------------
+            # INPUT VALIDATION
+            # ------------------------------------------------------
 
             if text is None:
 
@@ -551,9 +556,7 @@ class PredictionPipeline:
                     "message": "Text cannot be None."
                 }
 
-
             text = str(text).strip()
-
 
             if not text:
 
@@ -562,29 +565,25 @@ class PredictionPipeline:
                     "message": "Text cannot be empty."
                 }
 
-
             logging.info(
                 "Running hate speech prediction..."
             )
 
-
-            # --------------------------------------------------
-            # Clean text
-            # --------------------------------------------------
+            # ------------------------------------------------------
+            # CLEAN TEXT
+            # ------------------------------------------------------
 
             cleaned_text = self.clean_text(
                 text
             )
 
-
             logging.info(
                 f"Cleaned text: {cleaned_text}"
             )
 
-
-            # --------------------------------------------------
-            # Convert text to sequence
-            # --------------------------------------------------
+            # ------------------------------------------------------
+            # TOKENIZE
+            # ------------------------------------------------------
 
             sequence = (
                 self.tokenizer.texts_to_sequences(
@@ -592,10 +591,9 @@ class PredictionPipeline:
                 )
             )
 
-
-            # --------------------------------------------------
-            # Padding
-            # --------------------------------------------------
+            # ------------------------------------------------------
+            # PAD
+            # ------------------------------------------------------
 
             padded = pad_sequences(
                 sequence,
@@ -604,16 +602,14 @@ class PredictionPipeline:
                 truncating="pre"
             )
 
-
-            # --------------------------------------------------
-            # Prediction
-            # --------------------------------------------------
+            # ------------------------------------------------------
+            # PREDICT
+            # ------------------------------------------------------
 
             prediction = self.model.predict(
                 padded,
                 verbose=0
             )
-
 
             score = float(
                 np.asarray(
@@ -621,15 +617,13 @@ class PredictionPipeline:
                 ).reshape(-1)[0]
             )
 
-
             logging.info(
                 f"Prediction score: {score}"
             )
 
-
-            # --------------------------------------------------
-            # Classification
-            # --------------------------------------------------
+            # ------------------------------------------------------
+            # CLASSIFICATION
+            # ------------------------------------------------------
 
             if score >= 0.5:
 
@@ -639,7 +633,6 @@ class PredictionPipeline:
 
                 label = "no hate"
 
-
             return {
                 "status": "success",
                 "prediction": label,
@@ -648,7 +641,6 @@ class PredictionPipeline:
                     4
                 )
             }
-
 
         except Exception as e:
 
@@ -661,10 +653,9 @@ class PredictionPipeline:
                 "message": str(e)
             }
 
-
-    # ==========================================================
+    # ==============================================================
     # PIPELINE
-    # ==========================================================
+    # ==============================================================
 
     def run_pipeline(
         self,
