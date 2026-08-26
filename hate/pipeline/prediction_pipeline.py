@@ -2,9 +2,11 @@ import os
 import sys
 import re
 import string
-import pickle
+import json
 
 import nltk
+import numpy as np
+
 from nltk.corpus import stopwords
 
 from tensorflow import keras
@@ -34,132 +36,69 @@ class PredictionPipeline:
             )
 
             logging.info(
-                f"Base directory: {self.base_dir}"
+                f"Project base directory: {self.base_dir}"
             )
+
 
             # ==================================================
             # ARTIFACTS DIRECTORY
             # ==================================================
 
-            artifacts_dir = os.path.join(
+            self.artifacts_dir = os.path.join(
                 self.base_dir,
                 "artifacts"
             )
 
-            if not os.path.exists(artifacts_dir):
+            logging.info(
+                f"Artifacts directory: {self.artifacts_dir}"
+            )
 
-                raise FileNotFoundError(
-                    f"Artifacts directory not found: {artifacts_dir}"
-                )
 
             # ==================================================
             # FIND MODEL
             # ==================================================
 
-            model_files = []
-
-            for root, dirs, files in os.walk(artifacts_dir):
-
-                for file in files:
-
-                    if file.endswith(".h5") or file.endswith(".keras"):
-
-                        model_files.append(
-                            os.path.join(root, file)
-                        )
-
-            if not model_files:
-
-                raise FileNotFoundError(
-                    "No .h5 or .keras model found inside artifacts."
-                )
-
-            # Use latest model
-            model_files.sort(
-                key=os.path.getmtime,
-                reverse=True
-            )
-
-            self.model_path = model_files[0]
+            self.model_path = self._find_model()
 
             logging.info(
-                f"Model selected: {self.model_path}"
+                f"Selected model: {self.model_path}"
             )
 
+
             # ==================================================
-            # TOKENIZER
+            # TOKENIZER JSON
             # ==================================================
 
-            tokenizer_candidates = [
+            self.tokenizer_path = os.path.join(
+                self.base_dir,
+                "tokenizer.json"
+            )
 
-                os.path.join(
-                    self.base_dir,
-                    "tokenizer.pickle"
-                ),
-
-                os.path.join(
-                    artifacts_dir,
-                    "tokenizer.pickle"
-                )
-            ]
-
-            self.tokenizer_path = None
-
-            for path in tokenizer_candidates:
-
-                if os.path.exists(path):
-
-                    self.tokenizer_path = path
-                    break
-
-            if self.tokenizer_path is None:
-
-                # Search entire project
-                for root, dirs, files in os.walk(
-                    self.base_dir
-                ):
-
-                    for file in files:
-
-                        if file == "tokenizer.pickle":
-
-                            self.tokenizer_path = os.path.join(
-                                root,
-                                file
-                            )
-
-                            break
-
-                    if self.tokenizer_path:
-                        break
-
-            if self.tokenizer_path is None:
+            if not os.path.exists(self.tokenizer_path):
 
                 raise FileNotFoundError(
-                    "tokenizer.pickle not found."
+                    f"tokenizer.json not found at: "
+                    f"{self.tokenizer_path}"
                 )
 
             logging.info(
-                f"Tokenizer selected: {self.tokenizer_path}"
+                f"Tokenizer found: {self.tokenizer_path}"
             )
+
 
             # ==================================================
             # LOAD TOKENIZER
             # ==================================================
 
-            with open(
-                self.tokenizer_path,
-                "rb"
-            ) as file:
-
-                self.tokenizer = pickle.load(file)
+            self.tokenizer = self._load_tokenizer()
 
             logging.info(
                 "Tokenizer loaded successfully."
             )
 
+
             # ==================================================
-            # NLTK STOPWORDS
+            # STOPWORDS
             # ==================================================
 
             try:
@@ -179,6 +118,7 @@ class PredictionPipeline:
                     stopwords.words("english")
                 )
 
+
             # ==================================================
             # STEMMER
             # ==================================================
@@ -186,6 +126,7 @@ class PredictionPipeline:
             self.stemmer = nltk.SnowballStemmer(
                 "english"
             )
+
 
             # ==================================================
             # LOAD MODEL
@@ -204,115 +145,458 @@ class PredictionPipeline:
                 "TensorFlow model loaded successfully."
             )
 
+
+            # ==================================================
+            # MODEL STATUS
+            # ==================================================
+
+            self.model_loaded = True
+
             logging.info(
-                "PredictionPipeline initialized successfully."
+                "Prediction pipeline initialized successfully."
             )
+
 
         except Exception as e:
 
-            logging.error(
-                f"Prediction pipeline initialization failed: {e}"
+            self.model = None
+            self.tokenizer = None
+            self.model_loaded = False
+
+            logging.exception(
+                "Prediction pipeline initialization failed."
             )
 
-            raise CustomException(
-                e,
-                sys
-            ) from e
+            # Do NOT crash FastAPI completely.
+            # This allows /health to report the real problem.
+
+            self.initialization_error = str(e)
+
+
+    # ==========================================================
+    # FIND MODEL
+    # ==========================================================
+
+    def _find_model(self):
+
+        if not os.path.exists(self.artifacts_dir):
+
+            raise FileNotFoundError(
+                f"Artifacts directory not found: "
+                f"{self.artifacts_dir}"
+            )
+
+        model_files = []
+
+        for root, dirs, files in os.walk(
+            self.artifacts_dir
+        ):
+
+            for file in files:
+
+                if file.endswith(".h5"):
+
+                    model_files.append(
+                        os.path.join(
+                            root,
+                            file
+                        )
+                    )
+
+                elif file.endswith(".keras"):
+
+                    model_files.append(
+                        os.path.join(
+                            root,
+                            file
+                        )
+                    )
+
+
+        if not model_files:
+
+            raise FileNotFoundError(
+                "No .h5 or .keras model found "
+                "inside artifacts directory."
+            )
+
+
+        # ======================================================
+        # Select newest model
+        # ======================================================
+
+        model_files.sort(
+            key=os.path.getmtime,
+            reverse=True
+        )
+
+        return model_files[0]
+
+
+    # ==========================================================
+    # LOAD TOKENIZER FROM JSON
+    # ==========================================================
+
+    def _load_tokenizer(self):
+
+        with open(
+            self.tokenizer_path,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            tokenizer_config = json.load(f)
+
+
+        # ======================================================
+        # Keras tokenizer JSON structure
+        # ======================================================
+
+        config = tokenizer_config["config"]
+
+
+        # Keras JSON values can be encoded strings
+        def decode_value(value):
+
+            if isinstance(value, str):
+
+                try:
+
+                    return json.loads(value)
+
+                except Exception:
+
+                    return value
+
+            return value
+
+
+        word_counts = decode_value(
+            config.get("word_counts", "{}")
+        )
+
+        word_docs = decode_value(
+            config.get("word_docs", "{}")
+        )
+
+        index_docs = decode_value(
+            config.get("index_docs", "{}")
+        )
+
+        index_word = decode_value(
+            config.get("index_word", "{}")
+        )
+
+        word_index = decode_value(
+            config.get("word_index", "{}")
+        )
+
+
+        # ======================================================
+        # Normalize dictionary keys
+        # ======================================================
+
+        index_word = {
+            int(k): v
+            for k, v in index_word.items()
+        }
+
+        index_docs = {
+            int(k): int(v)
+            for k, v in index_docs.items()
+        }
+
+
+        # ======================================================
+        # Custom tokenizer object
+        # ======================================================
+
+        class JSONTokenizer:
+
+            def __init__(self):
+
+                self.word_index = word_index
+                self.index_word = index_word
+
+                self.num_words = config.get(
+                    "num_words",
+                    None
+                )
+
+                if self.num_words is not None:
+
+                    try:
+
+                        self.num_words = int(
+                            self.num_words
+                        )
+
+                    except Exception:
+
+                        pass
+
+                self.oov_token = config.get(
+                    "oov_token",
+                    None
+                )
+
+                self.lower = config.get(
+                    "lower",
+                    True
+                )
+
+                self.split = config.get(
+                    "split",
+                    " "
+                )
+
+
+            def texts_to_sequences(
+                self,
+                texts
+            ):
+
+                sequences = []
+
+
+                for text in texts:
+
+                    if text is None:
+
+                        text = ""
+
+                    text = str(text)
+
+
+                    if self.lower:
+
+                        text = text.lower()
+
+
+                    words = text.split(
+                        self.split
+                    )
+
+                    sequence = []
+
+
+                    for word in words:
+
+                        if word in self.word_index:
+
+                            index = self.word_index[word]
+
+                        elif self.oov_token is not None:
+
+                            index = self.word_index.get(
+                                self.oov_token
+                            )
+
+                        else:
+
+                            continue
+
+
+                        if index is None:
+
+                            continue
+
+
+                        if (
+                            self.num_words is None
+                            or index < self.num_words
+                        ):
+
+                            sequence.append(
+                                int(index)
+                            )
+
+
+                    sequences.append(sequence)
+
+
+                return sequences
+
+
+        return JSONTokenizer()
+
 
     # ==========================================================
     # TEXT CLEANING
     # ==========================================================
 
-    def clean_text(self, text):
+    def clean_text(
+        self,
+        text
+    ):
 
-        try:
+        text = str(text).lower()
 
-            text = str(text).lower()
 
-            # Remove square brackets
-            text = re.sub(
-                r"\[.*?\]",
-                "",
-                text
-            )
+        # ------------------------------------------------------
+        # Remove square brackets
+        # ------------------------------------------------------
 
-            # Remove URLs
-            text = re.sub(
-                r"https?://\S+|www\.\S+",
-                "",
-                text
-            )
+        text = re.sub(
+            r"\[.*?\]",
+            "",
+            text
+        )
 
-            # Remove HTML
-            text = re.sub(
-                r"<.*?>",
-                "",
-                text
-            )
 
-            # Remove punctuation
-            text = re.sub(
-                "[%s]" % re.escape(string.punctuation),
-                "",
-                text
-            )
+        # ------------------------------------------------------
+        # Remove URLs
+        # ------------------------------------------------------
 
-            # Remove newline
-            text = re.sub(
-                r"\n",
-                " ",
-                text
-            )
+        text = re.sub(
+            r"https?://\S+|www\.\S+",
+            "",
+            text
+        )
 
-            # Remove words containing numbers
-            text = re.sub(
-                r"\w*\d\w*",
-                "",
-                text
-            )
 
-            # Stopword removal + stemming
+        # ------------------------------------------------------
+        # Remove HTML
+        # ------------------------------------------------------
 
-            words = []
+        text = re.sub(
+            r"<.*?>",
+            "",
+            text
+        )
 
-            for word in text.split():
 
-                if word not in self.stop_words:
+        # ------------------------------------------------------
+        # Remove punctuation
+        # ------------------------------------------------------
 
-                    words.append(
-                        self.stemmer.stem(word)
-                    )
+        text = re.sub(
+            "[%s]" % re.escape(
+                string.punctuation
+            ),
+            "",
+            text
+        )
 
-            return " ".join(words)
 
-        except Exception as e:
+        # ------------------------------------------------------
+        # Remove newline
+        # ------------------------------------------------------
 
-            raise CustomException(
-                e,
-                sys
-            ) from e
+        text = re.sub(
+            r"\n",
+            "",
+            text
+        )
+
+
+        # ------------------------------------------------------
+        # Remove words containing numbers
+        # ------------------------------------------------------
+
+        text = re.sub(
+            r"\w*\d\w*",
+            "",
+            text
+        )
+
+
+        # ------------------------------------------------------
+        # Stopword removal + stemming
+        # ------------------------------------------------------
+
+        words = []
+
+        for word in text.split():
+
+            if word not in self.stop_words:
+
+                words.append(
+                    self.stemmer.stem(word)
+                )
+
+
+        return " ".join(words)
+
 
     # ==========================================================
     # PREDICTION
     # ==========================================================
 
-    def predict(self, text):
+    def predict(
+        self,
+        text
+    ):
 
         try:
+
+            if not self.model_loaded:
+
+                return {
+                    "status": "error",
+                    "message": (
+                        "Prediction model is not loaded."
+                    )
+                }
+
+
+            # --------------------------------------------------
+            # Validate input
+            # --------------------------------------------------
+
+            if text is None:
+
+                return {
+                    "status": "error",
+                    "message": "Text cannot be None."
+                }
+
+
+            text = str(text).strip()
+
+
+            if not text:
+
+                return {
+                    "status": "error",
+                    "message": "Text cannot be empty."
+                }
+
 
             logging.info(
                 "Running hate speech prediction..."
             )
 
-            # Clean
-            cleaned_text = self.clean_text(text)
 
-            # Tokenize
-            sequence = self.tokenizer.texts_to_sequences(
-                [cleaned_text]
+            # --------------------------------------------------
+            # Clean text
+            # --------------------------------------------------
+
+            cleaned_text = self.clean_text(
+                text
             )
 
+
+            logging.info(
+                f"Cleaned text: {cleaned_text}"
+            )
+
+
+            # --------------------------------------------------
+            # Convert text to sequence
+            # --------------------------------------------------
+
+            sequence = (
+                self.tokenizer.texts_to_sequences(
+                    [cleaned_text]
+                )
+            )
+
+
+            # --------------------------------------------------
             # Padding
+            # --------------------------------------------------
+
             padded = pad_sequences(
                 sequence,
                 maxlen=MAX_LEN,
@@ -320,48 +604,71 @@ class PredictionPipeline:
                 truncating="pre"
             )
 
+
+            # --------------------------------------------------
             # Prediction
+            # --------------------------------------------------
+
             prediction = self.model.predict(
                 padded,
                 verbose=0
             )
 
+
             score = float(
-                prediction[0][0]
+                np.asarray(
+                    prediction
+                ).reshape(-1)[0]
             )
+
 
             logging.info(
                 f"Prediction score: {score}"
             )
 
+
+            # --------------------------------------------------
             # Classification
+            # --------------------------------------------------
+
             if score >= 0.5:
 
-                return {
-                    "prediction": "hate and abusive",
-                    "score": round(score, 4)
-                }
+                label = "hate and abusive"
+
+            else:
+
+                label = "no hate"
+
 
             return {
-                "prediction": "no hate",
-                "score": round(score, 4)
+                "status": "success",
+                "prediction": label,
+                "score": round(
+                    score,
+                    4
+                )
             }
+
 
         except Exception as e:
 
-            logging.error(
-                f"Prediction failed: {e}"
+            logging.exception(
+                "Prediction failed."
             )
 
-            raise CustomException(
-                e,
-                sys
-            ) from e
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
 
     # ==========================================================
     # PIPELINE
     # ==========================================================
 
-    def run_pipeline(self, text):
+    def run_pipeline(
+        self,
+        text
+    ):
 
         return self.predict(text)
