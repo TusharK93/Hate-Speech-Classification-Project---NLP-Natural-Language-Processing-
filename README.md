@@ -75,8 +75,6 @@ The complete pipeline includes:
 * Render
 
 ### MLOps
-* MLflow
-* DVC (Optional)
 * Logging
 * Pipeline Automation
 
