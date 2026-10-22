@@ -70,7 +70,7 @@ The complete pipeline includes:
 * XGBoost (Optional)
 
 ### Deployment
-* Flask 
+* FastApi
 * GitHub
 * Render
 
