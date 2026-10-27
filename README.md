@@ -297,3 +297,7 @@ Add a `LICENSE` file to the repository if you intend to distribute the project u
 ⭐ If you find this project interesting, consider starring the repository!
 
 **Built with Python, NLP, LSTM, embeddings, and FastAPI to support scalable text classification and content moderation.**
+
+<p align="center">
+  <img src="hs.gif" alt="Financial RAG Assistant end-to-end pipeline" width="100%">
+</p>
